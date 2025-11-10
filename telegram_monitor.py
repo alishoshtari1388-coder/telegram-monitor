@@ -1,154 +1,235 @@
 import asyncio
-import os
 import json
+import os
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# تنظیمات محیطی
-API_ID = int(os.environ.get('API_ID'))
-API_HASH = os.environ.get('API_HASH')
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
-PHONE = os.environ.get('PHONE')
-SESSION_STRING = os.environ.get('SESSION_STRING', '').strip()  # مهم: اسم درست SESSION_STRING
+CONFIG_FILE = 'user_config.json'
 
-CONFIG_FILE = 'config.json'
+target_user = None
+forward_to = None
 
-# بارگذاری تنظیمات
 def load_config():
+    """بارگذاری تنظیمات از فایل"""
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, 'r') as f:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except:
-            return {"targets": [], "forward_to": None, "monitoring": False}
-    return {"targets": [], "forward_to": None, "monitoring": False}
+            return None
+    return None
 
 def save_config(config):
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
+    """ذخیره تنظیمات در فایل"""
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
 
-config = load_config()
-targets = config.get("targets", [])           # لیست آیدی‌ها
-forward_to = config.get("forward_to")
-monitoring = config.get("monitoring", False)
+def get_user_input():
+    """دریافت اطلاعات از کاربر با اعتبارسنجی"""
+    print("\n" + "="*50)
+    print("🤖 خوش آمدید به ربات مانیتور تلگرام")
+    print("="*50 + "\n")
 
-# کلاینت‌ها
-if SESSION_STRING:
-    user_client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-    print("از SESSION_STRING لاگین شد (ضدبلاک) ✅")
-else:
-    user_client = TelegramClient('user_session', API_ID, API_HASH)
+    print("📝 لطفاً اطلاعات خود را وارد کنید:\n")
 
-bot_client = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+    # دریافت و اعتبارسنجی API ID
+    while True:
+        api_id = input("🔑 API ID خود را وارد کنید: ").strip()
+        if api_id.isdigit() and len(api_id) > 0:
+            api_id = int(api_id)
+            break
+        else:
+            print("❌ API ID باید یک عدد باشد. دوباره تلاش کنید.\n")
 
-# دستورات ربات
-@bot_client.on(events.NewMessage(pattern='/start'))
-async def start(event):
-    await event.reply(
-        "ربات مانیتورینگ ۲۴/۷ آنلاینه!\n\n"
-        "دستورات:\n"
-        "/settarget 6768441111 → اضافه کردن هدف\n"
-        "/setforward -1003198309189 → مقصد فوروارد\n"
-        "/sta → لیست اهداف\n"
-        "/status → وضعیت ربات\n"
-        "/on → روشن کردن\n"
-        "/off → خاموش کردن\n"
-        "/clear → پاک کردن همه تنظیمات\n\n"
-        "توسط علی خفن ساخته شد!"
-    )
+    # دریافت و اعتبارسنجی API HASH
+    while True:
+        api_hash = input("🔐 API HASH خود را وارد کنید: ").strip()
+        if len(api_hash) > 0:
+            break
+        else:
+            print("❌ API HASH نمی‌تواند خالی باشد. دوباره تلاش کنید.\n")
 
-@bot_client.on(events.NewMessage(pattern='/settarget (\\d+)'))
-async def set_target(event):
-    global targets
-    new_id = int(event.pattern_match.group(1))
-    if new_id not in targets:
-        targets.append(new_id)
-        config['targets'] = targets
-        save_config(config)
-        await event.reply(f"هدف اضافه شد: {new_id} ✅\nکل اهداف: {len(targets)} تا")
-    else:
-        await event.reply(f"این هدف قبلاً اضافه شده!")
+    # دریافت و اعتبارسنجی شماره تلفن
+    while True:
+        phone = input("📱 شماره همراه خود را با +98 وارد کنید (مثال: +989123456789): ").strip()
+        if len(phone) > 0:
+            if not phone.startswith('+98'):
+                if phone.startswith('98'):
+                    phone = '+' + phone
+                elif phone.startswith('0'):
+                    phone = '+98' + phone[1:]
+                else:
+                    phone = '+98' + phone
+            break
+        else:
+            print("❌ شماره تلفن نمی‌تواند خالی باشد. دوباره تلاش کنید.\n")
 
-@bot_client.on(events.NewMessage(pattern='/setforward (-?\\d+)'))
-async def set_forward(event):
-    global forward_to
-    forward_to = int(event.pattern_match.group(1))
-    config['forward_to'] = forward_to
-    save_config(config)
-    await event.reply(f"مقصد فوروارد تنظیم شد: {forward_to} ✅")
+    # دریافت و اعتبارسنجی توکن ربات
+    while True:
+        bot_token = input("🤖 توکن ربات تلگرام خود را وارد کنید: ").strip()
+        if len(bot_token) > 0:
+            break
+        else:
+            print("❌ توکن ربات نمی‌تواند خالی باشد. دوباره تلاش کنید.\n")
 
-@bot_client.on(events.NewMessage(pattern='/sta'))
-async def list_targets(event):
-    if not targets:
-        await event.reply("هیچ هدفی تنظیم نشده!")
-    else:
-        txt = "لیست اهداف در حال مانیتور:\n"
-        for i, t in enumerate(targets, 1):
-            txt += f"{i}. `{t}`\n"
-        txt += f"\nکل: {len(targets)} هدف"
-        await event.reply(txt)
+    return {
+        'api_id': api_id,
+        'api_hash': api_hash,
+        'phone': phone,
+        'bot_token': bot_token,
+        'session': ''
+    }
 
-@bot_client.on(events.NewMessage(pattern='/status'))
-async def status(event):
-    status = "روشن 🚀" if monitoring else "خاموش ⏹"
-    target_count = len(targets)
-    dest = forward_to or "تنظیم نشده"
-    await event.reply(
-        f"وضعیت ربات:\n"
-        f"مانیتورینگ: {status}\n"
-        f"تعداد اهداف: {target_count}\n"
-        f"مقصد: `{dest}`\n"
-        f"تا قیامت روشن!"
-    )
-
-@bot_client.on(events.NewMessage(pattern='/on'))
-async def turn_on(event):
-    global monitoring
-    if not targets or not forward_to:
-        await event.reply("اول هدف و مقصد رو ست کن!")
-        return
-    monitoring = True
-    config['monitoring'] = True
-    save_config(config)
-    await event.reply("مانیتورینگ روشن شد! 🚀")
-
-@bot_client.on(events.NewMessage(pattern='/off'))
-async def turn_off(event):
-    global monitoring
-    monitoring = False
-    config['monitoring'] = False
-    save_config(config)
-    await event.reply("مانیتورینگ خاموش شد ⏹")
-
-@bot_client.on(events.NewMessage(pattern='/clear'))
-async def clear(event):
-    global targets, forward_to, monitoring
-    targets = []
-    forward_to = None
-    monitoring = False
-    config = {"targets": [], "forward_to": None, "monitoring": False}
-    save_config(config)
-    if os.path.exists('config.json'):
-        os.remove('config.json')
-    await event.reply("همه تنظیمات پاک شد!")
-
-# مانیتورینگ پیام‌ها
-@user_client.on(events.NewMessage)
-async def handler(event):
-    if monitoring and forward_to and event.sender_id in targets:
-        try:
-            await user_client.forward_messages(forward_to, event.message)
-            print(f"فوروارد شد از {event.sender_id} به {forward_to}")
-        except Exception as e:
-            print(f"خطا در فوروارد: {e}")
-
-# اجرای اصلی
 async def main():
-    print("در حال اتصال به تلگرام...")
-    await user_client.start(phone=PHONE if not SESSION_STRING else None)
-    print("هر دو اکانت متصل شدن ✅")
-    print("ربات ۲۴/۷ فعال شد و منتظر دستوراته 🚀")
+    global target_user, forward_to
+
+    # بررسی وجود تنظیمات
+    config = load_config()
+
+    if config is None:
+        print("\n⚙️  اولین بار است که ربات را اجرا می‌کنید\n")
+        config = get_user_input()
+        save_config(config)
+    else:
+        print("\n✅ تنظیمات قبلی شما پیدا شد!")
+        print(f"📱 شماره: {config['phone']}")
+
+        use_saved = input("\n❓ آیا می‌خواهید از تنظیمات قبلی استفاده کنید؟ (y/n): ").strip().lower()
+
+        if use_saved not in ['y', 'yes', 'بله', 'ب']:
+            print("\n🔄 دریافت تنظیمات جدید...\n")
+            config = get_user_input()
+            save_config(config)
+
+    print("\n" + "="*50)
+    print("🚀 در حال اتصال به تلگرام...")
+    print("="*50 + "\n")
+
+    # ایجاد کلاینت‌ها
+    user_client = TelegramClient(
+        StringSession(config.get('session', '')),
+        config['api_id'],
+        config['api_hash']
+    )
+
+    bot_client = TelegramClient(
+        'bot_session',
+        config['api_id'],
+        config['api_hash']
+    )
+
+    # اتصال به تلگرام
+    await bot_client.start(bot_token=config['bot_token'])
+    print("✅ ربات متصل شد")
+
+    await user_client.start(phone=config['phone'])
+    print("✅ اکانت کاربری متصل شد")
+
+    # ذخیره session برای دفعات بعد
+    session_string = user_client.session.save()
+    if session_string != config.get('session', ''):
+        config['session'] = session_string
+        save_config(config)
+        print("💾 Session ذخیره شد")
+
+    print("\n" + "="*50)
+    print("✅ هر دو اکانت با موفقیت متصل شدند!")
+    print("="*50 + "\n")
+
+    # تعریف دستورات ربات
+    @bot_client.on(events.NewMessage(pattern='/start'))
+    async def start_command(event):
+        welcome_msg = """
+🤖 خوش آمدید به ربات مانیتور تلگرام!
+
+📋 دستورات موجود:
+/settarget [USER_ID] - تنظیم کاربر هدف برای مانیتور
+/setforward [CHAT_ID] - تنظیم مقصد فوروارد پیام‌ها
+/sta - نمایش لیست اکانت‌های مانیتور شده
+/status - بررسی وضعیت ربات
+/help - نمایش راهنما
+
+💡 برای شروع، ابتدا کاربر هدف و مقصد فوروارد را تنظیم کنید.
+        """
+        await event.reply(welcome_msg)
+
+    @bot_client.on(events.NewMessage(pattern='/help'))
+    async def help_command(event):
+        help_msg = """
+📚 راهنمای استفاده از ربات:
+
+1️⃣ /settarget [USER_ID]
+   تنظیم ID کاربری که می‌خواهید پیام‌هایش را مانیتور کنید
+   مثال: /settarget 123456789
+
+2️⃣ /setforward [CHAT_ID]
+   تنظیم ID چت یا کانالی که پیام‌ها به آن فوروارد شوند
+   مثال: /setforward -1001234567890
+
+3️⃣ /sta
+   نمایش لیست کاربران و چت‌های تنظیم شده
+
+4️⃣ /status
+   بررسی وضعیت فعال بودن ربات
+
+❓ نکته: برای پیدا کردن USER_ID یا CHAT_ID می‌توانید از ربات‌های مخصوص تلگرام استفاده کنید.
+        """
+        await event.reply(help_msg)
+
+    @bot_client.on(events.NewMessage(pattern='/settarget (\\d+)'))
+    async def set_target(event):
+        global target_user
+        target_user = int(event.pattern_match.group(1))
+        await event.reply(f"✅ هدف تنظیم شد: {target_user}\n\n📥 از این پس تمام پیام‌های این کاربر مانیتور می‌شوند.")
+
+    @bot_client.on(events.NewMessage(pattern='/setforward (-?\\d+)'))
+    async def set_forward(event):
+        global forward_to
+        forward_to = int(event.pattern_match.group(1))
+        await event.reply(f"✅ مقصد فوروارد تنظیم شد: {forward_to}\n\n📤 پیام‌ها به این مقصد فوروارد خواهند شد.")
+
+    @bot_client.on(events.NewMessage(pattern='/sta'))
+    async def show_targets(event):
+        if target_user and forward_to:
+            await event.reply(f"🎯 اکانت‌های مانیتور شده:\n\n📥 هدف: {target_user}\n📤 فوروارد به: {forward_to}\n\n✅ ربات فعال است و پیام‌ها را مانیتور می‌کند.")
+        elif target_user:
+            await event.reply(f"🎯 اکانت‌های مانیتور شده:\n\n📥 هدف: {target_user}\n📤 فوروارد به: ⚠️ تنظیم نشده\n\n⚠️ لطفاً با /setforward مقصد را تنظیم کنید.")
+        elif forward_to:
+            await event.reply(f"🎯 اکانت‌های مانیتور شده:\n\n📥 هدف: ⚠️ تنظیم نشده\n📤 فوروارد به: {forward_to}\n\n⚠️ لطفاً با /settarget کاربر هدف را تنظیم کنید.")
+        else:
+            await event.reply("❌ هیچ اکانتی تنظیم نشده است\n\nلطفاً ابتدا با دستورات زیر تنظیمات را انجام دهید:\n/settarget [USER_ID]\n/setforward [CHAT_ID]")
+
+    @bot_client.on(events.NewMessage(pattern='/status'))
+    async def show_status(event):
+        status_msg = "✅ ربات روشن است و در حال کار می‌باشد\n\n"
+        if target_user and forward_to:
+            status_msg += "🟢 مانیتورینگ فعال است"
+        elif target_user or forward_to:
+            status_msg += "🟡 تنظیمات ناقص است - لطفاً هم هدف و هم مقصد را تنظیم کنید"
+        else:
+            status_msg += "🔴 تنظیمات انجام نشده - از /help استفاده کنید"
+
+        await event.reply(status_msg)
+
+    @user_client.on(events.NewMessage())
+    async def monitor(event):
+        if target_user and forward_to and event.sender_id == target_user:
+            try:
+                await event.message.forward_to(forward_to)
+                print(f"✅ پیام فوروارد شد از {target_user} به {forward_to}")
+            except Exception as e:
+                print(f"❌ خطا در فوروارد پیام: {e}")
+
+    print("🚀 ربات ۲۴/۷ فعال شد و منتظر پیام‌هاست!")
+    print("💬 برای شروع، دستور /start را در ربات خود ارسال کنید.\n")
+
+    # نگه داشتن ربات در حالت اجرا
     await asyncio.sleep(float('inf'))
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n\n👋 ربات متوقف شد. خدانگهدار!")
+    except Exception as e:
+        print(f"\n❌ خطا رخ داد: {e}")
