@@ -3,6 +3,7 @@ import json
 import os
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
+from datetime import datetime
 
 CONFIG_FILE = 'user_config.json'
 
@@ -80,6 +81,55 @@ def get_user_input():
         'session': ''
     }
 
+# --------------------- توابع جدید برای قابلیت شمارش ---------------------
+
+async def get_group_dialogs(user_client):
+    """
+    لیستی از گروه‌ها/سوپرگروه‌ها بازمی‌گرداند که کاربر (user_client) عضوشان است.
+    خروجی: [{'id': dialog.entity.id, 'title': dialog.name}, ...]
+    """
+    groups = []
+    async for dialog in user_client.iter_dialogs():
+        # dialog.is_user, dialog.is_group, dialog.is_channel
+        try:
+            # سعی می‌کنیم گروه‌ها و سوپرگروه‌ها را انتخاب کنیم
+            if dialog.is_group or getattr(dialog.entity, 'megagroup', False):
+                title = dialog.name or getattr(dialog.entity, 'title', str(dialog.entity.id))
+                groups.append({'id': dialog.entity.id, 'title': title})
+        except Exception:
+            # نادیده گرفتن خطاهای غیرمنتظره روی بعضی دیالوگ‌ها
+            continue
+    return groups
+
+async def count_daily_messages(user_client, target_user_id, group_id, limit_per_group=1000):
+    """
+    تعداد پیام‌های 'امروز' از target_user_id در یک گروه مشخص را می‌شمارد.
+    limit_per_group: حداکثر تعداد پیام که بررسی می‌کنیم (برای جلوگیری از کندی).
+    """
+    count = 0
+    # اگر پیام‌ها خیلی زیاد باشند، بررسی را پس از limit_per_group پیام متوقف می‌کنیم.
+    i = 0
+    async for msg in user_client.iter_messages(group_id, from_user=target_user_id):
+        i += 1
+        if i > limit_per_group:
+            # توقف برای جلوگیری از اسکن بی‌نهایت
+            break
+        try:
+            # msg.date معمولاً دارای timezone-aware هست؛ بنابراین تنها تاریخ را مقایسه می‌کنیم
+            msg_date = msg.date
+            today = datetime.now(msg_date.tzinfo).date() if msg_date.tzinfo else datetime.now().date()
+            if msg_date.date() == today:
+                count += 1
+            else:
+                # چون پیام‌ها به ترتیب زمانی هستند، اگر تاریخ قدیمی‌تر شد می‌تونیم خارج بشیم
+                break
+        except Exception:
+            # اگر هر پیام مشکلی داشت، از اون بگذریم
+            continue
+    return count
+
+# ---------------------------------------------------------------------
+
 async def main():
     global target_user, forward_to
 
@@ -147,6 +197,7 @@ async def main():
 /setforward [CHAT_ID] - تنظیم مقصد فوروارد پیام‌ها
 /sta - نمایش لیست اکانت‌های مانیتور شده
 /status - بررسی وضعیت ربات
+/dailyreport - گزارش تعداد پیام‌های امروز در گروه‌های مشترک
 /help - نمایش راهنما
 
 💡 برای شروع، ابتدا کاربر هدف و مقصد فوروارد را تنظیم کنید.
@@ -172,6 +223,9 @@ async def main():
 4️⃣ /status
    بررسی وضعیت فعال بودن ربات
 
+5️⃣ /dailyreport
+   دریافت گزارش تعداد پیام‌های امروز کاربر هدف در گروه‌های مشترک
+
 ❓ نکته: برای پیدا کردن USER_ID یا CHAT_ID می‌توانید از ربات‌های مخصوص تلگرام استفاده کنید.
         """
         await event.reply(help_msg)
@@ -180,7 +234,7 @@ async def main():
     async def set_target(event):
         global target_user
         target_user = int(event.pattern_match.group(1))
-        await event.reply(f"✅ هدف تنظیم شد: {target_user}\n\n📥 از این پس تمام پیام‌های این کاربر مانیتور می‌شوند.")
+        await event.reply(f"✅ هدف تنظیم شد: {target_user}\n\n📥 از این پس پیام‌های این کاربر قابل مانیتور شدن هستند.")
 
     @bot_client.on(events.NewMessage(pattern='/setforward (-?\\d+)'))
     async def set_forward(event):
@@ -191,11 +245,11 @@ async def main():
     @bot_client.on(events.NewMessage(pattern='/sta'))
     async def show_targets(event):
         if target_user and forward_to:
-            await event.reply(f"🎯 اکانت‌های مانیتور شده:\n\n📥 هدف: {target_user}\n📤 فوروارد به: {forward_to}\n\n✅ ربات فعال است و پیام‌ها را مانیتور می‌کند.")
+            await event.reply(f"🎯 تنظیمات فعلی:\n\n📥 هدف: {target_user}\n📤 فوروارد به: {forward_to}\n\n✅ ربات فعال است و پیام‌ها را مانیتور می‌کند.")
         elif target_user:
-            await event.reply(f"🎯 اکانت‌های مانیتور شده:\n\n📥 هدف: {target_user}\n📤 فوروارد به: ⚠️ تنظیم نشده\n\n⚠️ لطفاً با /setforward مقصد را تنظیم کنید.")
+            await event.reply(f"🎯 تنظیمات فعلی:\n\n📥 هدف: {target_user}\n📤 فوروارد به: ⚠️ تنظیم نشده\n\n⚠️ لطفاً با /setforward مقصد را تنظیم کنید.")
         elif forward_to:
-            await event.reply(f"🎯 اکانت‌های مانیتور شده:\n\n📥 هدف: ⚠️ تنظیم نشده\n📤 فوروارد به: {forward_to}\n\n⚠️ لطفاً با /settarget کاربر هدف را تنظیم کنید.")
+            await event.reply(f"🎯 تنظیمات فعلی:\n\n📥 هدف: ⚠️ تنظیم نشده\n📤 فوروارد به: {forward_to}\n\n⚠️ لطفاً با /settarget کاربر هدف را تنظیم کنید.")
         else:
             await event.reply("❌ هیچ اکانتی تنظیم نشده است\n\nلطفاً ابتدا با دستورات زیر تنظیمات را انجام دهید:\n/settarget [USER_ID]\n/setforward [CHAT_ID]")
 
@@ -210,6 +264,48 @@ async def main():
             status_msg += "🔴 تنظیمات انجام نشده - از /help استفاده کنید"
 
         await event.reply(status_msg)
+
+    # دستور جدید: شمارش پیام‌های روزانه در گروه‌های مشترک
+    @bot_client.on(events.NewMessage(pattern='/dailyreport'))
+    async def daily_report(event):
+        if not target_user:
+            await event.reply("❌ ابتدا باید با دستور /settarget کاربر هدف را مشخص کنید.")
+            return
+
+        await event.reply("⏳ در حال بررسی گروه‌های مشترک و شمارش پیام‌ها... (ممکن است چند ثانیه طول بکشد)")
+
+        try:
+            groups = await get_group_dialogs(user_client)
+            if not groups:
+                await event.reply("⚠️ هیچ گروهی در حساب کاربری پیدا نشد.")
+                return
+
+            report_lines = []
+            total = 0
+            # اگر تعداد گروه‌ها خیلی زیاد بود می‌تونی اینجا محدود کنی (مثلاً groups[:50])
+            for g in groups:
+                count = await count_daily_messages(user_client, target_user, g['id'], limit_per_group=1000)
+                total += count
+                report_lines.append(f"💬 {g['title']}: {count} پیام")
+
+            if not report_lines:
+                await event.reply("⚠️ هیچ گروه مشترکی برای بررسی پیدا نشد.")
+                return
+
+            report_text = f"📊 گزارش فعالیت امروز کاربر {target_user}:\n\n" + "\n".join(report_lines)
+            report_text += f"\n\n🕒 مجموع پیام‌ها امروز: {total}"
+
+            # اگر پیام خیلی طولانی شد، آن را در چند پیام بفرست
+            if len(report_text) > 4000:
+                # قسمت‌بندی متن
+                parts = [report_text[i:i+3500] for i in range(0, len(report_text), 3500)]
+                for p in parts:
+                    await event.reply(p)
+            else:
+                await event.reply(report_text)
+
+        except Exception as e:
+            await event.reply(f"❌ خطا در تولید گزارش: {e}")
 
     @user_client.on(events.NewMessage())
     async def monitor(event):
